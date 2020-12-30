@@ -1,8 +1,11 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Mollie.Api.Client;
+using Mollie.Api.Models.Order;
 using Nop.Core;
 using Nop.Core.Domain.Orders;
 using Nop.Plugin.Payments.MolliePayments.Models;
+using Nop.Plugin.Payments.MolliePayments.Utilities;
 using Nop.Services.Common;
 using Nop.Services.Configuration;
 using Nop.Services.Localization;
@@ -13,10 +16,11 @@ using Nop.Services.Security;
 using Nop.Web.Framework;
 using Nop.Web.Framework.Controllers;
 using Nop.Web.Framework.Mvc.Filters;
+using System;
+using System.Collections.Generic;
 
 namespace Nop.Plugin.Payments.MolliePayments.Controllers
 {
-    [AutoValidateAntiforgeryToken]
     public class PaymentMolliePaymentsController : BasePaymentController
     {
         #region Fields
@@ -26,6 +30,10 @@ namespace Nop.Plugin.Payments.MolliePayments.Controllers
         private readonly IStoreContext _storeContext;
         private readonly INotificationService _notificationService;
         private readonly ILocalizationService _localizationService;
+        private readonly IOrderProcessingService _orderProcessingService;
+        private readonly IOrderService _orderService;
+        private MollieStandardPaymentSettings _mollieStandardPaymentSettings;
+        private OrderClient _mollieOrderClient;
 
         #endregion
 
@@ -35,13 +43,35 @@ namespace Nop.Plugin.Payments.MolliePayments.Controllers
             IPermissionService permissionService,
             IStoreContext storeContext,
             INotificationService notificationService,
-            ILocalizationService localizationService)
+            ILocalizationService localizationService,
+            IOrderProcessingService orderProcessingService,
+            IOrderService orderService,
+        MollieStandardPaymentSettings mollieStandardPaymentSettings)
         {
             _settingService = settingService;
             _permissionService = permissionService;
             _storeContext = storeContext;
             _notificationService = notificationService;
             _localizationService = localizationService;
+            _orderProcessingService = orderProcessingService;
+            _orderService = orderService;
+            _mollieStandardPaymentSettings = mollieStandardPaymentSettings;
+
+            _mollieOrderClient = MollieAPIClients.MollieOrderClient(
+                _mollieStandardPaymentSettings.UseSandbox,
+                GetKeysDictionary());
+        }
+
+        #endregion
+
+        #region Utilities
+        private Dictionary<string, string> GetKeysDictionary()
+        {
+            return new Dictionary<string, string>
+            {
+                { "live", _mollieStandardPaymentSettings.ApiLiveKey },
+                { "test", _mollieStandardPaymentSettings.ApiTestKey }
+            };
         }
 
         #endregion
@@ -108,6 +138,17 @@ namespace Nop.Plugin.Payments.MolliePayments.Controllers
             _notificationService.SuccessNotification(_localizationService.GetResource("Admin.Plugins.Saved"));
 
             return Configure();
+        }
+
+        [HttpPost]
+        public IActionResult MollieWebHook(string id)
+        {
+            OrderResponse retrieveOrder = _mollieOrderClient.GetOrderAsync(id).Result;
+
+            Order order = _orderService.GetOrderById(Convert.ToInt32(retrieveOrder.OrderNumber));
+            order.PaymentStatus = Core.Domain.Payments.PaymentStatus.Paid;
+
+            return Ok(200);
         }
 
         #endregion

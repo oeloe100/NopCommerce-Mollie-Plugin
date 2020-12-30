@@ -1,7 +1,6 @@
 ﻿using Mollie.Api.Client;
-using System;
+using Mollie.Api.Client.Abstract;
 using System.Collections.Generic;
-using System.Text;
 
 namespace Nop.Plugin.Payments.MolliePayments.Utilities
 {
@@ -9,14 +8,31 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
     {
         private static string _selectedKey;
 
-        public static PaymentClient MolliePaymentClient(bool isSandbox, IDictionary<string, string> apiKeys)
+        public static PaymentClient MolliePaymentClient(
+            bool isSandbox, 
+            IDictionary<string, string> apiKeys)
         {
             _selectedKey = apiKeys["live"];
 
             if (isSandbox)
+            {
                 _selectedKey = apiKeys["test"];
+            }
 
             return new PaymentClient(_selectedKey);
+        }
+
+        public static OrderClient MollieOrderClient(bool isSandbox,
+            IDictionary<string, string> apiKeys)
+        {
+            _selectedKey = apiKeys["live"];
+
+            if (isSandbox)
+            {
+                _selectedKey = apiKeys["test"];
+            }
+
+            return new OrderClient(_selectedKey);
         }
     }
 }

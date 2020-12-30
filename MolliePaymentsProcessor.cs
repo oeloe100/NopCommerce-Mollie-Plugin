@@ -1,14 +1,23 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Mollie.Api.Client;
+using Mollie.Api.Models;
+using Mollie.Api.Models.Order;
 using Nop.Core;
+using Nop.Core.Domain.Common;
+using Nop.Core.Domain.Directory;
 using Nop.Core.Domain.Orders;
 using Nop.Plugin.Payments.MolliePayments.Utilities;
+using Nop.Services.Catalog;
+using Nop.Services.Common;
 using Nop.Services.Configuration;
+using Nop.Services.Directory;
 using Nop.Services.Localization;
+using Nop.Services.Orders;
 using Nop.Services.Payments;
 using Nop.Services.Plugins;
 using System;
 using System.Collections.Generic;
-using System.Text;
+using OrderStatus = Mollie.Api.Models.Order.OrderStatus;
 
 namespace Nop.Plugin.Payments.MolliePayments
 {
@@ -22,8 +31,17 @@ namespace Nop.Plugin.Payments.MolliePayments
         private readonly IWebHelper _webHelper;
         private readonly ILocalizationService _localizationService;
         private readonly ISettingService _settingService;
-
+        private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IAddressService _addressService;
+        private readonly IStateProvinceService _stateProvinceService;
+        private readonly ICountryService _countryService;
+        private readonly ICurrencyService _currencyService;
+        private readonly IProductService _productService;
+        private readonly IOrderService _orderService;
+        private readonly CurrencySettings _currencySettings;
         private readonly MollieStandardPaymentSettings _mollieStandardPaymentSettings;
+
+        private OrderClient _mollieOrderClient;
 
         #endregion
 
@@ -32,12 +50,68 @@ namespace Nop.Plugin.Payments.MolliePayments
         public MolliePaymentsProcessor(IWebHelper webHelper,
             ILocalizationService localizationService,
             ISettingService settingService,
+            IHttpContextAccessor httpContextAccessor,
+            IAddressService addressService,
+            IStateProvinceService stateProvinceService,
+            ICountryService countryService,
+            ICurrencyService currencyService,
+            IProductService productService,
+            IOrderService orderService,
+            CurrencySettings currencySettings,
             MollieStandardPaymentSettings mollieStandardPaymentSettings)
         {
             _webHelper = webHelper;
             _localizationService = localizationService;
             _settingService = settingService;
+            _httpContextAccessor = httpContextAccessor;
+            _addressService = addressService;
+            _stateProvinceService = stateProvinceService;
+            _countryService = countryService;
+            _currencyService = currencyService;
+            _currencySettings = currencySettings;
+            _productService = productService;
+            _orderService = orderService;
             _mollieStandardPaymentSettings = mollieStandardPaymentSettings;
+
+            _mollieOrderClient = MollieAPIClients.MollieOrderClient(
+                _mollieStandardPaymentSettings.UseSandbox, 
+                GetKeysDictionary());
+        }
+
+        #endregion
+
+        #region Utilities
+
+        private Dictionary<string, string> GetKeysDictionary()
+        {
+            return new Dictionary<string, string>
+            {
+                { "live", _mollieStandardPaymentSettings.ApiLiveKey },
+                { "test", _mollieStandardPaymentSettings.ApiTestKey }
+            };
+        }
+
+        private Address SelectOrderAdress(PostProcessPaymentRequest postProcessPaymentRequest)
+        {
+            //choosing correct order address
+            var orderAddress = _addressService.GetAddressById(
+                (postProcessPaymentRequest.Order.PickupInStore ?
+                postProcessPaymentRequest.Order.PickupAddressId :
+                postProcessPaymentRequest.Order.ShippingAddressId) ?? 0);
+
+            return orderAddress;
+        } 
+
+        private Address SelectBillingAdress(PostProcessPaymentRequest postProcessPaymentRequest)
+        {
+            var billingAddress = _addressService.GetAddressById(postProcessPaymentRequest.Order.BillingAddressId);
+
+            return billingAddress;
+        }
+
+        private Core.Domain.Directory.Currency SelectCurrency()
+        {
+            return _currencyService.GetCurrencyById(_currencySettings.PrimaryStoreCurrencyId);
         }
 
         #endregion
@@ -83,7 +157,9 @@ namespace Nop.Plugin.Payments.MolliePayments
         /// <returns>Process payment result</returns>
         public ProcessPaymentResult ProcessPayment(ProcessPaymentRequest processPaymentRequest)
         {
-            return new ProcessPaymentResult();
+            var result = new ProcessPaymentResult();
+
+            return result;
         }
 
         /// <summary>
@@ -94,17 +170,23 @@ namespace Nop.Plugin.Payments.MolliePayments
         /// <param name="postProcessPaymentRequest"></param>
         public void PostProcessPayment(PostProcessPaymentRequest postProcessPaymentRequest)
         {
-            var keyDictionary = new Dictionary<string, string>
-            {
-                { "live", _mollieStandardPaymentSettings.ApiLiveKey },
-                { "test", _mollieStandardPaymentSettings.ApiTestKey }
-            };
+            var redirectUrl = 
+                _httpContextAccessor.HttpContext.Request.Scheme + "://" +
+                _httpContextAccessor.HttpContext.Request.Host + "/" +
+                "checkout/completed/" + postProcessPaymentRequest.Order.Id;
 
-            var mollieApiClient = MollieAPIClients.MolliePaymentClient(_mollieStandardPaymentSettings.UseSandbox, keyDictionary);
+            var orderLines = CreatePaymentRequest.BuildOrderLines(
+                postProcessPaymentRequest, SelectCurrency(), 
+                _productService, _orderService);
 
-            CreatePaymentRequest.MolliePaymentRequest(
-                postProcessPaymentRequest.Order.OrderTotal,
-                postProcessPaymentRequest.Order.CheckoutAttributeDescription);
+            var orderRequest = CreatePaymentRequest.MollieOrderRequest(
+                postProcessPaymentRequest, orderLines, redirectUrl, 
+                SelectOrderAdress(postProcessPaymentRequest), SelectBillingAdress(postProcessPaymentRequest), SelectCurrency(),
+                _stateProvinceService, _countryService);
+
+            OrderResponse orderResponse = _mollieOrderClient.CreateOrderAsync(orderRequest).Result;
+
+            _httpContextAccessor.HttpContext.Response.Redirect(orderResponse.Links.Checkout.Href);
         }
 
         /// <summary>
@@ -224,12 +306,16 @@ namespace Nop.Plugin.Payments.MolliePayments
         public bool CanRePostProcessPayment(Order order)
         {
             if (order == null)
+            {
                 throw new ArgumentNullException(nameof(order));
+            }
 
             //let's ensure that at least 5 seconds passed after order is placed
             //P.S. there's no any particular reason for that. we just do it
             if ((DateTime.UtcNow - order.CreatedOnUtc).TotalSeconds < 1)
+            {
                 return false;
+            }
 
             return true;
         }
@@ -268,7 +354,7 @@ namespace Nop.Plugin.Payments.MolliePayments
 
         public PaymentMethodType PaymentMethodType => PaymentMethodType.Redirection;
 
-        public bool SkipPaymentInfo => false;
+        public bool SkipPaymentInfo => true;
 
         public string PaymentMethodDescription => _localizationService.GetResource("Plugins.Payments.MolliePayments.PaymentMethodDescription");
 
