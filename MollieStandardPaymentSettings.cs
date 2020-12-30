@@ -15,11 +15,11 @@ namespace Nop.Plugin.Payments.MolliePayments
         /// <summary>
         /// Gets or sets a value for the Mollie Live Key
         /// </summary>
-        public string ApiTestKey { get; set; } = "";
+        public string ApiTestKey { get; set; } = "ABC123";
 
         /// <summary>
         /// Gets or sets a value for the Mollie Test Key
         /// </summary>
-        public string ApiLiveKey { get; set; } = "";
+        public string ApiLiveKey { get; set; } = "ABC123";
     }
 }

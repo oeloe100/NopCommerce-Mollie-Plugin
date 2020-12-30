@@ -2,9 +2,9 @@
   "Group": "Payment methods",
   "FriendlyName": "Mollie Payments",
   "SystemName": "Payments.MolliePayments",
-  "Version": "1.60",
+  "Version": "1.00",
   "SupportedVersions": [ "4.30" ],
-  "Author": "nopCommerce team",
+  "Author": "Anton Rashchenko",
   "DisplayOrder": 1,
   "FileName": "Nop.Plugin.Payments.MolliePayments.dll",
   "Description": "This plugin allows paying with mollie payments"
