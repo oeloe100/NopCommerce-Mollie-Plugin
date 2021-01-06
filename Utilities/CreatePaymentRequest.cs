@@ -43,7 +43,8 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
             Address billingAddress,
             Core.Domain.Directory.Currency selectCurrency,
             IStateProvinceService stateProvinceService,
-            ICountryService countryService)
+            ICountryService countryService,
+            string url)
         {
             var orderRequest =  new OrderRequest()
             {
@@ -82,7 +83,7 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
                 ShopperCountryMustMatchBillingCountry = true,
                 RedirectUrl = redirectUrl,
                 Locale = Locale.nl_NL,
-                WebhookUrl = "https://c067a2b22396.ngrok.io/PaymentMolliePayments/MollieWebHook"
+                WebhookUrl = url + "/PaymentMolliePayments/MollieWebHook"
             };
 
             return orderRequest;
@@ -95,13 +96,13 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
             IOrderService orderService)
         {
             var orderLine = new List<OrderLineRequest>();
-            var roundedTaxAmount = Math.Round(postProcessPaymentRequest.Order.OrderTax, 2);
             var taxRateToDecimal = Convert.ToDecimal(postProcessPaymentRequest.Order.TaxRates.Substring(0, 2));
 
             foreach (var item in orderService.GetOrderItems(postProcessPaymentRequest.Order.Id))
             {
                 var product = productService.GetProductById(item.ProductId);
                 var roundedItemPrice = Math.Round(item.UnitPriceInclTax, 2);
+                var roundedTaxAmount = Math.Round((item.UnitPriceInclTax - item.UnitPriceExclTax), 2);
 
                 orderLine.Add(new OrderLineRequest()
                 {
@@ -111,8 +112,7 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
                     UnitPrice = new Amount(selectCurrency.CurrencyCode, roundedItemPrice),
                     TotalAmount = new Amount(selectCurrency.CurrencyCode, (item.Quantity * roundedItemPrice)),
                     VatRate = postProcessPaymentRequest.Order.TaxRates.Substring(0, 2),
-                    VatAmount = new Amount(selectCurrency.CurrencyCode, roundedTaxAmount.ToString("0.00", CultureInfo.InvariantCulture)),
-                    DiscountAmount = new Amount(selectCurrency.CurrencyCode, item.DiscountAmountInclTax),
+                    VatAmount = new Amount(selectCurrency.CurrencyCode, roundedTaxAmount.ToString("0.00", CultureInfo.InvariantCulture))
                 });
             }
 

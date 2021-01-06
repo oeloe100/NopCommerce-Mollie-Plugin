@@ -1,11 +1,14 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Mollie.Api.Client;
 using Mollie.Api.Models;
+using Mollie.Api.Models.List;
 using Mollie.Api.Models.Order;
+using Mollie.Api.Models.Refund;
 using Nop.Core;
 using Nop.Core.Domain.Common;
 using Nop.Core.Domain.Directory;
 using Nop.Core.Domain.Orders;
+using Nop.Core.Domain.Payments;
 using Nop.Plugin.Payments.MolliePayments.Utilities;
 using Nop.Services.Catalog;
 using Nop.Services.Common;
@@ -18,6 +21,7 @@ using Nop.Services.Plugins;
 using System;
 using System.Collections.Generic;
 using OrderStatus = Mollie.Api.Models.Order.OrderStatus;
+using Microsoft.AspNetCore.Http.Extensions;
 
 namespace Nop.Plugin.Payments.MolliePayments
 {
@@ -42,6 +46,7 @@ namespace Nop.Plugin.Payments.MolliePayments
         private readonly MollieStandardPaymentSettings _mollieStandardPaymentSettings;
 
         private OrderClient _mollieOrderClient;
+        private RefundClient _refundClient;
 
         #endregion
 
@@ -75,6 +80,10 @@ namespace Nop.Plugin.Payments.MolliePayments
 
             _mollieOrderClient = MollieAPIClients.MollieOrderClient(
                 _mollieStandardPaymentSettings.UseSandbox, 
+                GetKeysDictionary());
+
+            _refundClient = MollieAPIClients.MollieRefundClient(
+                _mollieStandardPaymentSettings.UseSandbox,
                 GetKeysDictionary());
         }
 
@@ -170,6 +179,9 @@ namespace Nop.Plugin.Payments.MolliePayments
         /// <param name="postProcessPaymentRequest"></param>
         public void PostProcessPayment(PostProcessPaymentRequest postProcessPaymentRequest)
         {
+            var location = new Uri($"{_httpContextAccessor.HttpContext.Request.Scheme}://{_httpContextAccessor.HttpContext.Request.Host}");
+            var url = location.AbsoluteUri;
+
             var redirectUrl = 
                 _httpContextAccessor.HttpContext.Request.Scheme + "://" +
                 _httpContextAccessor.HttpContext.Request.Host + "/" +
@@ -182,7 +194,7 @@ namespace Nop.Plugin.Payments.MolliePayments
             var orderRequest = CreatePaymentRequest.MollieOrderRequest(
                 postProcessPaymentRequest, orderLines, redirectUrl, 
                 SelectOrderAdress(postProcessPaymentRequest), SelectBillingAdress(postProcessPaymentRequest), SelectCurrency(),
-                _stateProvinceService, _countryService);
+                _stateProvinceService, _countryService, url);
 
             OrderResponse orderResponse = _mollieOrderClient.CreateOrderAsync(orderRequest).Result;
 
@@ -258,10 +270,47 @@ namespace Nop.Plugin.Payments.MolliePayments
         /// <returns></returns>
         public RefundPaymentResult Refund(RefundPaymentRequest refundPaymentRequest)
         {
-            //Implement Mollie.Api refund logic here. 
-            //This method enabled refund using store dashboard.
+            ListResponse<OrderResponse> listResponse = _mollieOrderClient.GetOrderListAsync().Result;
 
-            throw new NotImplementedException();
+            var mollieOrderId = "";
+
+            foreach (var orderItem in listResponse.Items)
+            {
+                if (orderItem.OrderNumber == refundPaymentRequest.Order.CustomOrderNumber)
+                    mollieOrderId = orderItem.Id;
+            }
+
+            if (string.IsNullOrEmpty(mollieOrderId))
+                return new RefundPaymentResult { Errors = new[] { "Mollie OrderID is Null or Empty" } };
+
+            OrderResponse retrieveOrder = _mollieOrderClient.GetOrderAsync(mollieOrderId).Result;
+
+            var orderlineList = new List<OrderLineDetails>();
+
+            foreach (var item in _orderService.GetOrderItems(refundPaymentRequest.Order.Id))
+            {
+                foreach (var line in retrieveOrder.Lines)
+                {
+                    orderlineList.Add(new OrderLineDetails()
+                    {
+                        Id = line.Id,
+                        Quantity = item.Quantity,
+                        Amount = new Amount(SelectCurrency().CurrencyCode, line.TotalAmount)
+                    });
+                }
+            }
+
+            OrderRefundRequest refundRequest = new OrderRefundRequest()
+            {
+                Lines = orderlineList
+            };
+
+            OrderRefundResponse result = _mollieOrderClient.CreateOrderRefundAsync(mollieOrderId, refundRequest).Result;
+
+            return new RefundPaymentResult
+            {
+                NewPaymentStatus = refundPaymentRequest.IsPartialRefund ? PaymentStatus.PartiallyRefunded : PaymentStatus.Refunded
+            };
         }
 
         /// <summary>

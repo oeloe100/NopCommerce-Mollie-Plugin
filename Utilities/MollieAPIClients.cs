@@ -22,7 +22,8 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
             return new PaymentClient(_selectedKey);
         }
 
-        public static OrderClient MollieOrderClient(bool isSandbox,
+        public static OrderClient MollieOrderClient(
+            bool isSandbox,
             IDictionary<string, string> apiKeys)
         {
             _selectedKey = apiKeys["live"];
@@ -33,6 +34,20 @@ namespace Nop.Plugin.Payments.MolliePayments.Utilities
             }
 
             return new OrderClient(_selectedKey);
+        }
+
+        public static RefundClient MollieRefundClient(
+            bool isSandbox,
+            IDictionary<string, string> apiKeys)
+        {
+            _selectedKey = apiKeys["live"];
+
+            if (isSandbox)
+            {
+                _selectedKey = apiKeys["test"];
+            }
+
+            return new RefundClient(_selectedKey);
         }
     }
 }

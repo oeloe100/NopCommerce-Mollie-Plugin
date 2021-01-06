@@ -146,9 +146,19 @@ namespace Nop.Plugin.Payments.MolliePayments.Controllers
             OrderResponse retrieveOrder = _mollieOrderClient.GetOrderAsync(id).Result;
 
             Order order = _orderService.GetOrderById(Convert.ToInt32(retrieveOrder.OrderNumber));
-            order.PaymentStatus = Core.Domain.Payments.PaymentStatus.Paid;
+            order.PaymentStatus = MolliePaymentStatusToNopCommercePaymentStatus(retrieveOrder.Status);
 
             return Ok(200);
+        }
+
+        private Core.Domain.Payments.PaymentStatus MolliePaymentStatusToNopCommercePaymentStatus(string molliePaymentStatus)
+        {
+            return molliePaymentStatus switch
+            {
+                "paid" => Core.Domain.Payments.PaymentStatus.Paid,
+                "authorized" => Core.Domain.Payments.PaymentStatus.Authorized,
+                _ => Core.Domain.Payments.PaymentStatus.Paid,
+            };
         }
 
         #endregion
